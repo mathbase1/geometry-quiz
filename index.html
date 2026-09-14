@@ -613,7 +613,21 @@ function compositeSolidDiagram(r,h,hemi){const L=200,R=420,C=310,T=190,B=325;let
  return svg(body,'A cylinder joined to a '+(hemi?'hemisphere':'cone')+'. The dashed join is internal. Not to scale.',620,410);
 }
 const extensionShapes=[[[0,0],[3,0],[3,3],[0,3]],[[0,0],[5,0],[5,2],[0,2]],[[0,0],[4,0],[3,3],[1,3]],[[0,0],[3,0],[4,2],[1,2]],[[0,0],[4,0],[2,3]],[[0,0],[3,0],[0,4]],[[0,0],[3,1],[2,4],[0,2]],[[0,0],[2,-1],[4,0],[2,3]]];
-function variedTransform(R,v,kind){return choose(R,()=>{
+// A linear signed-distance test keeps the ENTIRE polygon clear of the mirror.
+// All vertices in one open half-plane also keeps every edge and the interior there.
+// Axial mirrors: at least 1 grid unit. Diagonal mirrors: at least sqrt(2) units.
+function reflectionHasClearGap(a){
+ if(!a||a.kind!=='reflection'||!Array.isArray(a.original)||a.original.length<3)return false;
+ let distance,limit=1;
+ if(a.mode==='vertical')distance=([x,y])=>x-a.c;
+ else if(a.mode==='horizontal')distance=([x,y])=>y-a.c;
+ else if(a.mode==='diagonal'){distance=([x,y])=>y-x;limit=2;}
+ else if(a.mode==='negativeDiagonal'){distance=([x,y])=>y+x;limit=2;}
+ else return false;
+ const d=a.original.map(distance);
+ return d.every(x=>Number.isFinite(x)&&x>=limit)||d.every(x=>Number.isFinite(x)&&x<=-limit);
+}
+function variedTransform(R,v,kind,clearMirror=false){return choose(R,()=>{
  const base=(v<8?shapeTemplates:extensionShapes)[v%8],turn0=R.int(0,3),sx0=R.pick([-1,1]),stretch=R.pick([1,1,1,2]);
  let pts=base.map(([x,y])=>[sx0*x,y]);if(stretch===2&&Math.max(...pts.map(p=>Math.abs(p[0])))<=3)pts=pts.map(([x,y])=>[x*2,y]);
  pts=pts.map(([x,y])=>turn0===0?[x,y]:turn0===1?[-y,x]:turn0===2?[-x,-y]:[y,-x]);
@@ -622,7 +636,7 @@ function variedTransform(R,v,kind){return choose(R,()=>{
  else if(kind==='rotation'){const cx=R.int(-3,3),cy=R.int(-3,3),turn=R.pick([90,-90,180,-180,270,-270]);target=original.map(([x,y])=>{const X=x-cx,Y=y-cy,t=(turn%360+360)%360;return t===90?[cx-Y,cy+X]:t===270?[cx+Y,cy-X]:[cx-X,cy-Y];});meta={cx,cy,turn};}
  else{const mode=R.pick(['vertical','horizontal','diagonal','negativeDiagonal']),c=['vertical','horizontal'].includes(mode)?R.int(-4,4):0;target=original.map(([x,y])=>mode==='vertical'?[2*c-x,y]:mode==='horizontal'?[x,2*c-y]:mode==='diagonal'?[y,x]:[-y,-x]);meta={mode,c};}
  return {original,target,kind,shapeFamily:v%16,...meta};
- },a=>a.original.concat(a.target).every(p=>p.every(x=>Number.isInteger(x)&&Math.abs(x)<=9))&&!a.target.some(p=>a.original.some(q=>pointKey(p)===pointKey(q)))&&(kind!=='rotation'||a.original.every(([x,y])=>Math.hypot(x-a.cx,y-a.cy)<=Math.min(9-Math.abs(a.cx),9-Math.abs(a.cy)))),'varied transformation with a visible complete sweep');}
+ },a=>a.original.concat(a.target).every(p=>p.every(x=>Number.isInteger(x)&&Math.abs(x)<=9))&&!a.target.some(p=>a.original.some(q=>pointKey(p)===pointKey(q)))&&(!clearMirror||reflectionHasClearGap(a))&&(kind!=='rotation'||a.original.every(([x,y])=>Math.hypot(x-a.cx,y-a.cy)<=Math.min(9-Math.abs(a.cx),9-Math.abs(a.cy)))),'varied transformation with a visible complete sweep');}
 function extComposite(R,v){let rawA,rawP,exA,exP,body,prompt,audit,steps=[];
  if(v%4<2){const t=R.pick([[6,8,10],[9,12,15],[5,12,13],[8,15,17]]),b=t[0],a=t[1],c=t[2],L=R.int(9,23);rawA=L*b+a*b/2;rawP=2*L+b+a+c;exA=`${L}*${b}+${a}*${b}/2`;exP=`2*${L}+${b}+${a}+${c}`;
  body=poly([[140,95],[390,95],[500,255],[140,255]])+seg(390,95,390,255,'stroke-dasharray="6 4"')+dim(140,255,390,255,`${L} cm`)+dim(390,255,500,255,`${a} cm`)+dim(140,255,140,95,`${b} cm`,-1)+txt(487,151,`${c} cm`)+`<path d="M377 255v-13h13" fill="none" stroke="#24364b" stroke-width="2"/>`;
@@ -751,9 +765,108 @@ function studentSection(i,D){
  return out;
 }
 
+
+// Revision 4: transformation grids in part (a) only; short follow-up tasks in part (b).
+// Previous revisions remain unchanged so archived answers are never reinterpreted.
+function rotationFollowUp(R,v){
+ const mode=v%8,cw=R.pick([true,false]),sgn=cw?1:-1;
+ const direction=clockwise=>clockwise?'clockwise':'anticlockwise';
+ const turnText=t=>`${Math.abs(t)}° ${direction(t>0)}`;
+ let turns=[],undo=false,prompt;
+ if(mode===0){
+  turns=[sgn*R.pick([90,270])];
+  prompt=lines(`A shape is rotated ${turnText(turns[0])} about O.`,`Which rotation in the OPPOSITE direction gives the same final position?`);
+ }else if(mode===1){
+  const a=R.pick([90,180]);turns=[sgn*a,sgn*(270-a)];
+  prompt=lines(`A shape rotates ${turnText(turns[0])}, then ${turnText(turns[1])}, about the same centre.`,`Which single rotation gives the same final position?`);
+ }else if(mode===2){
+  const a=R.pick([180,270]),b=R.pick([90,180].filter(n=>n<a));turns=[sgn*a,-sgn*b];
+  prompt=lines(`A shape rotates ${turnText(turns[0])}, then ${turnText(turns[1])}, about the same centre.`,`Which single rotation gives the same final position?`);
+ }else if(mode===3){
+  turns=[sgn*R.pick([90,180,270])];undo=true;
+  prompt=lines(`A shape has been rotated ${turnText(turns[0])} about O.`,`Which rotation about O returns it to its original position?`);
+ }else if(mode===4){
+  turns=[sgn*90,sgn*90,sgn*90];
+  prompt=lines(`A shape makes three quarter-turns ${direction(cw)} about the same centre.`,`Which single rotation gives the same final position?`);
+ }else if(mode===5){
+  const n=R.pick([5,6,7]);turns=Array(n).fill(sgn*90);
+  prompt=lines(`A pointer makes ${n} quarter-turns ${direction(cw)} about its centre.`,`Which single rotation gives the same final direction?`);
+ }else if(mode===6){
+  turns=[sgn*180,sgn*R.pick([90,270])];undo=true;
+  prompt=lines(`A shape rotates ${turnText(turns[0])}, then ${turnText(turns[1])}, about O.`,`Which single rotation about O returns it to its starting position?`);
+ }else{
+  const a=R.pick([90,180,270]),b=R.pick([90,180,270].filter(n=>n!==a));turns=[sgn*a,-sgn*b];undo=true;
+  prompt=lines(`A shape rotates ${turnText(turns[0])}, then ${turnText(turns[1])}, about O.`,`Which single rotation about O undoes these two turns?`);
+ }
+ const requestedClockwise=mode===0?!cw:R.pick([true,false]);
+ // Put the requested direction in the question; short angle options remain legible on small screens.
+ prompt=prompt.slice(0,prompt.indexOf('</p>')+4)+sen(undo?`What angle ${direction(requestedClockwise)} about the same centre returns it to its starting position?`:`What angle ${direction(requestedClockwise)} about the same centre gives the same final position?`);
+ const net=turns.reduce((sum,t)=>sum+t,0)*(undo?-1:1),target=bearing(net*(requestedClockwise?1:-1));
+ const options=R.shuffle([90,180,270,360].map(angle=>({value:String(angle),label:angle+'°'})));
+ const label=options.find(o=>o.value===String(target)).label;
+ return part('b',prompt,[sf('q8b',target,options,2,'Angle')],'Choose one angle.',{kind:'rotationFollowUp',mode,turns,undo,requestedClockwise},`${undo?'Reverse the combined turn. ':''}Clockwise turns count positively and anticlockwise turns negatively. Remove any complete 360° turns. The matching turn is ${label} ${direction(requestedClockwise)}.`);
+}
+function reflectionFollowUp(R,v){
+ const mode=v%8,d=R.int(4,18),change=R.int(2,d-2);
+ let prompt,answer,options,solution,extra={};
+ const distances=(correct,pool)=>{
+  const choices=[...new Set([correct,...pool])].filter(x=>Number.isInteger(x)&&x>0);
+  for(let x=correct+1;choices.length<4;x++)if(!choices.includes(x))choices.push(x);
+  return R.shuffle(choices.slice(0,4).map(x=>({value:String(x),label:x+' cm'})));
+ };
+ if(mode===0){
+  answer=2*d;prompt=lines(`P is ${d} cm from a mirror line.`,`How far apart are P and its reflection?`);
+  options=distances(answer,[d,d+2,3*d]);solution=`The mirror is halfway between P and its image. Their separation is 2 × ${d} = ${answer} cm.`;
+ }else if(mode===1){
+  answer=d;prompt=lines(`P and its reflection are ${2*d} cm apart.`,`How far is P from the mirror line?`);
+  options=distances(answer,[2*d,4*d,d+2]);solution=`Halve the distance between P and its reflection: ${2*d} ÷ 2 = ${answer} cm.`;
+ }else if(mode===2||mode===3){
+  const vertical=mode===2,from=R.pick(vertical?['left','right']:['above','below']),opposite={left:'right',right:'left',above:'below',below:'above'}[from];
+  answer='opposite';extra={vertical,from};
+  prompt=lines(`P is ${d} cm ${vertical?'to the '+from+' of':from} a ${vertical?'vertical':'horizontal'} mirror line.`,`Where is its reflection?`);
+  const position=(n,side)=>`${n} cm ${side}`;
+  options=R.shuffle([{value:'opposite',label:position(d,opposite)},{value:'same',label:position(d,from)},{value:'doubleOpposite',label:position(2*d,opposite)},{value:'doubleSame',label:position(2*d,from)}]);
+  solution=`The image is the same distance on the opposite side: ${d} cm ${vertical?'to the '+opposite+' of':opposite} the mirror line.`;
+ }else if(mode===4){
+  answer=2*(d+change);prompt=lines(`P is ${d} cm from a mirror line, then moves ${change} cm directly away from it.`,`How far apart are P and its new reflection?`);
+  options=distances(answer,[d+change,2*d+change,2*(d-change)]);solution=`The new distance to the mirror is ${d}+${change} = ${d+change} cm. Double it: ${answer} cm.`;
+ }else if(mode===5){
+  answer=2*(d-change);prompt=lines(`P is ${d} cm from a mirror line, then moves ${change} cm directly towards it.`,`How far apart are P and its new reflection?`);
+  options=distances(answer,[d-change,2*d-change,2*(d+change)]);solution=`The new distance to the mirror is ${d}−${change} = ${d-change} cm. Double it: ${answer} cm.`;
+ }else if(mode===6){
+  answer=2*change;prompt=lines(`P moves ${change} cm directly away from a mirror line.`,`By how many centimetres does the gap between P and its reflection INCREASE?`);
+  options=distances(answer,[change,3*change,4*change]);solution=`P and its reflection each move ${change} cm away from the mirror. The gap increases by 2 × ${change} = ${answer} cm.`;
+ }else{
+  answer=2*change;prompt=lines(`P is ${d} cm from a mirror line, then moves ${change} cm directly towards it.`,`By how many centimetres does the gap between P and its reflection DECREASE?`);
+  options=distances(answer,[change,2*d,2*(d-change)]);solution=`Both points move ${change} cm towards the mirror. The gap decreases by 2 × ${change} = ${answer} cm.`;
+ }
+ return part('b',prompt,[sf('q9b',answer,options,2,'Answer')],'Choose one answer.',{kind:'reflectionFollowUp',mode,d,change,...extra},solution);
+}
+function transformationPartBSection(i,D){
+ const out=studentSection(i,D);
+ if(i===6){
+  // Restore the existing column-vector calculation for EVERY draw, including profiles 8–15.
+  // The first eight profiles keep exactly the vector questions already approved.
+  const oldD=j=>{const d=D(j);return {...d,v:d.v%8};};
+  out[1]=baseGenerators[6](oldD)[1];
+ }else if(i===7){const {R,v}=D(1);out[1]=rotationFollowUp(R,v);}
+ else if(i===8){const {R,v}=D(1);out[1]=reflectionFollowUp(R,v);}
+ return out;
+}
+
+// Revision 5 changes Q9(a) placement only. Older saved plans keep their exact diagrams.
+function separatedReflectionSection(i,D){
+ const out=transformationPartBSection(i,D);
+ if(i!==8||reflectionHasClearGap(out[0].audit))return out;
+ const {R,v}=D(0),a=variedTransform(R,v,'reflection',true);
+ const rule=a.mode==='vertical'?`x = ${a.c}`:a.mode==='horizontal'?`y = ${a.c}`:a.mode==='diagonal'?'y = x':'y = −x';
+ out[0]={...out[0],prompt:sen('Reflect the blue shape in the dashed line:')+line(math(mt(rule))),fields:[pf('q9a',a)],audit:a};
+ return out;
+}
+
 // Plan and assessment contract.
 function validDraws(i,draws){return Array.isArray(draws)&&draws.length===GROUPS[i]&&draws.every(d=>d&&Number.isInteger(d.variant)&&d.variant>=0&&d.variant<VARIANTS&&Array.isArray(d.seed)&&d.seed.length===4&&d.seed.every(x=>Number.isInteger(x)&&x>=0&&x<=4294967295));}
-function section(i,draws,revision=3){if(!Number.isInteger(i)||i<0||i>=14||!validDraws(i,draws))throw Error('Invalid section plan');const D=j=>({R:rng(draws[j].seed),v:draws[j].variant});const parts=revision===1?baseGenerators[i](D):revision===2?extendedSection(i,D):studentSection(i,D),max=parts.flatMap(p=>p.fields).reduce((n,f)=>n+f.max,0);if(max!==MAXIMA[i])throw Error('Section marks changed: '+(i+1)+' = '+max);return {index:i+1,title:revision===3&&i===7?'Rotation':TITLES[i],spec:revision===3&&i===7?['FG7','FG9']:SPEC[i],calculator:CALCULATOR[i],max,parts};}
+function section(i,draws,revision=5){if(!Number.isInteger(i)||i<0||i>=14||!validDraws(i,draws))throw Error('Invalid section plan');const D=j=>({R:rng(draws[j].seed),v:draws[j].variant});const parts=revision===1?baseGenerators[i](D):revision===2?extendedSection(i,D):revision===3?studentSection(i,D):revision===4?transformationPartBSection(i,D):separatedReflectionSection(i,D),max=parts.flatMap(p=>p.fields).reduce((n,f)=>n+f.max,0);if(max!==MAXIMA[i])throw Error('Section marks changed: '+(i+1)+' = '+max);if(revision>=5&&i===8&&!reflectionHasClearGap(parts[0].audit))throw Error('Reflection shape must stay clear of its mirror line');return {index:i+1,title:revision>=3&&i===7?'Rotation':TITLES[i],spec:revision>=3&&i===7?['FG7','FG9']:SPEC[i],calculator:CALCULATOR[i],max,parts};}
 function paper(plan){if(!Array.isArray(plan)||plan.length!==14)throw Error('Invalid paper');const sections=plan.map((p,i)=>section(i,p.draws,p.revision??1));return {version:VERSION,sections,max:sections.reduce((n,s)=>n+s.max,0)};}
 const allFields=p=>p.sections.flatMap(s=>s.parts.flatMap(pt=>pt.fields));
 function answerIds(f){if(f.kind==='points')return f.target.flatMap((_,i)=>[f.id+'_'+i+'_x',f.id+'_'+i+'_y']);if(['point','vector','ratio'].includes(f.kind))return f.target.map((_,i)=>f.id+'_'+i);return [f.id];}
@@ -824,12 +937,12 @@ function freshPlan(){
    if(!recent.includes(h)&&!parts.some((p,j)=>p&&Array.isArray(pastParts[j])&&pastParts[j].includes(p)))break;
    if(attempt===119)throw new Error('Could not build a fresh set. Please press Start again.');
   }
-  plan.push({draws,revision:3});sections.push(s);
+  plan.push({draws,revision:5});sections.push(s);
   history[i]={recent:[h,...recent].slice(0,8),parts:parts.map((p,j)=>[p,...(Array.isArray(pastParts[j])?pastParts[j]:[])].slice(0,5))};
  }
  const p={version:E.VERSION,sections,max:100};E.verify(p);store('localStorage','history',JSON.stringify(history));return {plan,paper:p};
 }
-function validRecord(r){return r&&r.version===E.VERSION&&/^\d{1,20}$/.test(r.student)&&typeof r.id==='string'&&r.id.length<90&&['active','ended'].includes(r.phase)&&Array.isArray(r.plan)&&r.plan.length===14&&r.plan.every((p,i)=>p&&(!('revision' in p)||[1,2,3].includes(p.revision))&&E.validDraws(i,p.draws))&&r.answers&&typeof r.answers==='object'&&!Array.isArray(r.answers);}
+function validRecord(r){return r&&r.version===E.VERSION&&/^\d{1,20}$/.test(r.student)&&typeof r.id==='string'&&r.id.length<90&&['active','ended'].includes(r.phase)&&Array.isArray(r.plan)&&r.plan.length===14&&r.plan.every((p,i)=>p&&(!('revision' in p)||[1,2,3,4,5].includes(p.revision))&&E.validDraws(i,p.draws))&&r.answers&&typeof r.answers==='object'&&!Array.isArray(r.answers);}
 function snapshotValues(){if(!paper)return {};const out={};for(const f of E.allFields(paper))for(const id of E.inputIds(f)){const input=$(id);out[id]=String(input?.value??'').slice(0,180);}return out;}
 function persist(){if(current)store('sessionStorage','current',JSON.stringify(current));}
 function saveAnswers(){if(phase!=='active'||!current)return;current.answers=snapshotValues();persist();updateProgress();}
